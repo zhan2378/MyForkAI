@@ -7,6 +7,7 @@ from utils import chunk_text
 from retrieval import hybrid_retrieve
 import time
 from collections import defaultdict
+from provider_factory import make_provider
 
 def auto_branch_name(prefix="branch"):
     return f"{prefix}-{time.strftime('%Y%m%d-%H%M%S')}"
@@ -46,14 +47,14 @@ def cmd_ask(args):
     if not node_id:
         raise SystemExit("ERROR: Provide --node-id or set a head for this dialog.")
 
-    oa = OAClient(args.model, args.embed_model)
+    provider = make_provider(args.provider, args.model, args.embed_model)
 
     # append user question
     db.append_message(args.dialog_id, node_id, "user", args.question)
 
     # call model
     msgs = db.get_messages(args.dialog_id, node_id)
-    ans = oa.respond(msgs, temperature=args.temperature, max_tokens=args.max_tokens)
+    ans = provider.respond(msgs, temperature=args.temperature, max_tokens=args.max_tokens)
 
     # store assistant reply
     db.append_message(args.dialog_id, node_id, "assistant", ans)
@@ -61,8 +62,8 @@ def cmd_ask(args):
     # optionally embed + store to memory
     if not args.no_memory:
         for ch in chunk_text(ans, max_chars=args.chunk_chars, overlap=args.chunk_overlap):
-            emb = oa.embed([ch])[0]
-            db.add_memory(args.dialog_id, node_id, ch, emb, {"type": "assistant_answer", "node": node_id})
+            emb = provider.embed([ch])[0]
+            db.add_memory(args.dialog_id, node_id, ch, emb, {"type": "assistant_answer", "node": node_id,"embed_provider": args.provider,"embed_model": args.embed_model})
 
     # update head
     db.set_head(args.dialog_id, node_id)
@@ -72,12 +73,30 @@ def cmd_ask(args):
 def cmd_retrieve(args):
     ensure_api_key()
     db = AssistantDB(args.db)
-    oa = OAClient(args.model, args.embed_model)
+    #oa = OAClient(args.model, args.embed_model)
+    embed_provider = args.provider if args.embed_provider == "same" else None
+    if args.provider == "gemini" and args.embed_model == "text-embedding-3-small":
+        args.embed_model = "gemini-embedding-001"
 
+    provider_client = make_provider(args.provider, args.model, args.embed_model)
+    if args.embed_provider == "any":
+        ep = None
+    elif args.embed_provider == "same":
+        ep = args.provider
+    else:
+        ep = args.embed_provider
     hits = hybrid_retrieve(
-        db, oa, args.dialog_id, args.query,
-        k_sem=args.k_sem, k_fts=args.k_fts, k_final=args.k
+        db,
+        provider_client,
+        args.dialog_id,
+        args.query,
+        k_final=args.k,
+        k_fts=args.k_fts,
+        mode="universal",
+        embed_provider=ep,   # None means ANY
     )
+
+
 
     if not hits:
         print("(no hits)")
@@ -226,6 +245,7 @@ def main():
     p_ask.add_argument("--no-memory", action="store_true", help="Do not store response chunks into memory.")
     p_ask.add_argument("--chunk-chars", type=int, default=1800)
     p_ask.add_argument("--chunk-overlap", type=int, default=200)
+    p_ask.add_argument("--provider", default="openai", choices=["openai","gemini"])
     p_ask.set_defaults(func=cmd_ask)
 
     # retrieve
@@ -237,6 +257,13 @@ def main():
     p_ret.add_argument("--k", type=int, default=5)
     p_ret.add_argument("--k-sem", type=int, default=10)
     p_ret.add_argument("--k-fts", type=int, default=10)
+    p_ret.add_argument("--provider", default="openai", choices=["openai","gemini"])
+    p_ret.add_argument(
+        "--embed-provider",
+        default="same",
+        choices=["same", "any"],
+        help="Use same embedding provider as --provider, or search across all stored embeddings."
+    )
     p_ret.set_defaults(func=cmd_retrieve)
 
     # nodes
