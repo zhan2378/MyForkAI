@@ -11,10 +11,51 @@ from provider_factory import make_provider
 
 def auto_branch_name(prefix="branch"):
     return f"{prefix}-{time.strftime('%Y%m%d-%H%M%S')}"
-def ensure_api_key():
-    # OpenAI SDK reads OPENAI_API_KEY from env automatically.
-    if not os.environ.get("OPENAI_API_KEY"):
-        raise SystemExit("ERROR: OPENAI_API_KEY is not set in your environment.")
+def ensure_api_key(provider: str):
+    provider = (provider or "openai").lower()
+    if provider == "openai":
+        if not os.environ.get("OPENAI_API_KEY"):
+            raise SystemExit("ERROR: OPENAI_API_KEY is not set in your environment.")
+    elif provider == "gemini":
+        if not (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")):
+            raise SystemExit("ERROR: GEMINI_API_KEY (or GOOGLE_API_KEY) is not set in your environment.")
+    else:
+        raise SystemExit(f"ERROR: Unknown provider: {provider}")
+
+def normalize_provider_args(args):
+    """Provider-aware defaults for model/embed-model.
+    Runs before dispatch so make_provider() always receives compatible names.
+    """
+    provider = (getattr(args, "provider", None) or "openai").lower()
+    model = getattr(args, "model", None)
+    embed_model = getattr(args, "embed_model", None)
+
+    def is_openai_like(s):
+        return isinstance(s, str) and (s.startswith("gpt-") or s.startswith("text-embedding-"))
+
+    def is_gemini_like(s):
+        return isinstance(s, str) and s.startswith("gemini-")
+
+    if provider == "gemini":
+        if model is None or is_openai_like(model):
+            if hasattr(args, "model"):
+                args.model = "gemini-3-pro-preview"
+        if embed_model is None or is_openai_like(embed_model):
+            if hasattr(args, "embed_model"):
+                args.embed_model = "gemini-embedding-001"
+        if hasattr(args, "provider"):
+            args.provider = "gemini"
+    else:
+        if model is None or is_gemini_like(model):
+            if hasattr(args, "model"):
+                args.model = "gpt-5.2"
+        if embed_model is None or is_gemini_like(embed_model):
+            if hasattr(args, "embed_model"):
+                args.embed_model = "text-embedding-3-small"
+        if hasattr(args, "provider"):
+            args.provider = "openai"
+
+    return args
 
 def cmd_new(args):
     db = AssistantDB(args.db)
@@ -40,7 +81,7 @@ def cmd_fork(args):
     print("note:", note)
 
 def cmd_ask(args):
-    ensure_api_key()
+    ensure_api_key(args.provider)
     db = AssistantDB(args.db)
 
     node_id = args.node_id or db.get_head(args.dialog_id)
@@ -64,19 +105,14 @@ def cmd_ask(args):
         for ch in chunk_text(ans, max_chars=args.chunk_chars, overlap=args.chunk_overlap):
             emb = provider.embed([ch])[0]
             db.add_memory(args.dialog_id, node_id, ch, emb, {"type": "assistant_answer", "node": node_id,"embed_provider": args.provider,"embed_model": args.embed_model})
-
     # update head
     db.set_head(args.dialog_id, node_id)
 
     print(ans.strip())
 
 def cmd_retrieve(args):
-    ensure_api_key()
+    ensure_api_key(args.provider)
     db = AssistantDB(args.db)
-    #oa = OAClient(args.model, args.embed_model)
-    embed_provider = args.provider if args.embed_provider == "same" else None
-    if args.provider == "gemini" and args.embed_model == "text-embedding-3-small":
-        args.embed_model = "gemini-embedding-001"
 
     provider_client = make_provider(args.provider, args.model, args.embed_model)
     if args.embed_provider == "any":
@@ -296,6 +332,7 @@ def main():
     p_diff.set_defaults(func=cmd_diff)
 
     args = p.parse_args()
+    args = normalize_provider_args(args)
     args.func(args)
 
 

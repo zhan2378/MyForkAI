@@ -1,6 +1,7 @@
 # gemini_client.py
 from typing import List, Dict
 from google import genai
+import os
 
 
 class GeminiClient:
@@ -17,7 +18,14 @@ class GeminiClient:
         model: str = "gemini-3-pro-preview",
         embed_model: str = "gemini-embedding-001",
     ):
-        self.client = genai.Client()
+        api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "Gemini API key not found. Set GEMINI_API_KEY or GOOGLE_API_KEY."
+            )
+
+        # 🔑 Explicitly pass api_key (required by your SDK version)
+        self.client = genai.Client(api_key=api_key)
         self.model = model
         self.embed_model = embed_model
 
