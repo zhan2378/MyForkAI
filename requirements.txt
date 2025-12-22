@@ -2,3 +2,4 @@ openai
 numpy
 python-dotenv
 streamlit
+google-genai
