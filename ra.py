@@ -23,10 +23,16 @@ def ensure_api_key(provider: str):
         raise SystemExit(f"ERROR: Unknown provider: {provider}")
 
 def normalize_provider_args(args):
-    """Provider-aware defaults for model/embed-model.
-    Runs before dispatch so make_provider() always receives compatible names.
-    """
     provider = (getattr(args, "provider", None) or "openai").lower()
+
+    # --- Provider-specific temperature defaults ---
+    if hasattr(args, "temperature") and args.temperature is None:
+        if provider == "openai":
+            args.temperature = 0.2
+        elif provider == "gemini":
+            args.temperature = 0.4
+
+    # --- existing model / embed-model logic ---
     model = getattr(args, "model", None)
     embed_model = getattr(args, "embed_model", None)
 
@@ -276,7 +282,7 @@ def main():
     p_ask.add_argument("--question", required=True)
     p_ask.add_argument("--model", default="gpt-5.2")
     p_ask.add_argument("--embed-model", default="text-embedding-3-small")
-    p_ask.add_argument("--temperature", type=float, default=0.2)
+    p_ask.add_argument("--temperature", type=float, default=None)
     p_ask.add_argument("--max-tokens", type=int, default=900)
     p_ask.add_argument("--no-memory", action="store_true", help="Do not store response chunks into memory.")
     p_ask.add_argument("--chunk-chars", type=int, default=1800)

@@ -28,8 +28,13 @@ else:
 
 model = st.sidebar.text_input("Model", value=default_model)
 embed_model = st.sidebar.text_input("Embed model", value=default_embed)
-
-temperature = st.sidebar.slider("Temperature", 0.0, 1.0, 0.2, 0.05)
+default_temp = 0.2 if provider == "openai" else 0.4
+temperature = st.slider(
+    "Temperature",
+    0.0, 1.5,
+    value=default_temp,
+    step=0.05
+)
 max_tokens = st.sidebar.number_input("Max tokens", min_value=50, max_value=4000, value=900, step=50)
 store_memory = st.sidebar.checkbox("Store assistant reply into memory", value=True)
 
